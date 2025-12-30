@@ -3,7 +3,7 @@
 A FastAPI-based REST API for cloud media storage and management, integrated with Azure Cosmos DB and Azure Blob Storage.
 
 ## Features
-
+111
 - User authentication with JWT tokens
 - Image and video upload to Azure Blob Storage
 - Metadata storage in Azure Cosmos DB for NoSQL
