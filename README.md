@@ -25,7 +25,7 @@ A FastAPI-based REST API for cloud media storage and management, integrated with
 
 ```
 bancked/
-├── main.py                 # FastAPI application entry point
+├── app.py                 # FastAPI application entry point
 ├── config.py              # Configuration and settings
 ├── models.py              # Pydantic models for request/response
 ├── auth.py                # Authentication utilities (JWT, password hashing)
@@ -126,10 +126,10 @@ ALLOWED_VIDEO_TYPES=video/mp4,video/mpeg,video/quicktime,video/webm
 
 ```bash
 # Development mode with auto-reload
-python main.py
+python app.py
 
 # Or using uvicorn directly
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app:app --reload --host 0.0.0.0 --port 8000
 ```
 
 The API will be available at:

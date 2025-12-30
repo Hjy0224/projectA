@@ -38,4 +38,4 @@ echo "Starting Cloud Media Platform API..."
 echo "API will be available at: http://localhost:8000"
 echo "Documentation: http://localhost:8000/api/docs"
 echo ""
-python main.py
+python app.py

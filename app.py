@@ -1,16 +1,17 @@
+import logging
+from contextlib import asynccontextmanager
+
+import uvicorn
 from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
-from contextlib import asynccontextmanager
-import logging
-import uvicorn
 
 from config import settings
 from database import cosmos_db
-from storage import blob_storage
 from routes_auth import router as auth_router
 from routes_media import router as media_router
+from storage import blob_storage
 
 # Configure logging
 logging.basicConfig(
@@ -123,7 +124,7 @@ async def root():
 
 if __name__ == "__main__":
     uvicorn.run(
-        "main:app",
+        "app:app",
         host=settings.api_host,
         port=settings.api_port,
         reload=True,
