@@ -1,11 +1,12 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 
 from config import settings
 from database import cosmos_db
@@ -110,16 +111,43 @@ async def health_check():
 app.include_router(auth_router, prefix="/api")
 app.include_router(media_router, prefix="/api")
 
+# Static files configuration
+static_dir = Path(__file__).parent / "static"
+if static_dir.exists():
+    # Serve index.html for root path
+    @app.get("/", tags=["Frontend"])
+    async def serve_frontend():
+        """Serve Angular frontend"""
+        return FileResponse(static_dir / "index.html")
 
-# Root endpoint
-@app.get("/", tags=["Root"])
-async def root():
-    """Root endpoint"""
-    return {
-        "message": "Cloud Media Platform API",
-        "version": "1.0.0",
-        "docs": "/api/docs",
-    }
+    # Catch-all route for Angular routing and static files (must be last)
+    @app.get("/{full_path:path}", tags=["Frontend"])
+    async def serve_spa(full_path: str):
+        """Serve Angular frontend for all non-API routes"""
+        # Check if it's an API route
+        if full_path.startswith("api/"):
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"error": {"code": "NOT_FOUND", "message": "Endpoint not found"}}
+            )
+
+        # Check if file exists in static directory
+        file_path = static_dir / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+
+        # Otherwise return index.html for Angular routing
+        return FileResponse(static_dir / "index.html")
+else:
+    # Fallback root endpoint if static files don't exist
+    @app.get("/", tags=["Root"])
+    async def root():
+        """Root endpoint"""
+        return {
+            "message": "Cloud Media Platform API",
+            "version": "1.0.0",
+            "docs": "/api/docs",
+        }
 
 
 if __name__ == "__main__":
