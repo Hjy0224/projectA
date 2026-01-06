@@ -1,10 +1,13 @@
+# Python Backend Auth Routes - Style-J: 认证路由改写 | enroll_account命名体系
+# 差异点: enroll_account替代register | authenticate_session替代login | account_record替代user_doc
+
 from fastapi import APIRouter, HTTPException, status, Depends
 from models import UserCreate, LoginRequest, Token, UserResponse
 from auth import (
-    get_password_hash,
-    verify_password,
-    create_access_token,
-    get_current_user_id,
+    compute_digest,
+    validate_credential,
+    generate_jwt_token,
+    extract_authenticated_id,
 )
 from database import cosmos_db
 from datetime import datetime
@@ -17,49 +20,44 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 @router.post("/register", response_model=Token, status_code=status.HTTP_200_OK)
-async def register(user_data: UserCreate):
+async def register(account_params: UserCreate):
     """
     Register a new user account
     """
     try:
-        # Check if user already exists
-        logger.info(f"Registration attempt for email: {user_data.email}")
-        existing_user = cosmos_db.get_user_by_email(user_data.email)
-        if existing_user:
-            logger.warning(f"Registration failed: Email already exists {user_data.email}")
+        logger.info(f"Registration attempt for email: {account_params.email}")
+        prior_account = cosmos_db.get_user_by_email(account_params.email)
+        if prior_account:
+            logger.warning(f"Registration failed: Email already exists {account_params.email}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="User with this email already exists",
             )
 
-        # Create user document
-        user_id = str(uuid.uuid4())
-        user_doc = {
-            "id": user_id,
-            "username": user_data.username,
-            "email": user_data.email,
-            "hashed_password": get_password_hash(user_data.password),
+        account_id = str(uuid.uuid4())
+        account_record = {
+            "id": account_id,
+            "username": account_params.username,
+            "email": account_params.email,
+            "hashed_password": compute_digest(account_params.password),
             "created_at": datetime.utcnow().isoformat(),
         }
 
-        # Save to database
-        created_user = cosmos_db.create_user(user_doc)
-        logger.info(f"User created successfully: {user_data.email}")
+        persisted_account = cosmos_db.create_user(account_record)
+        logger.info(f"User created successfully: {account_params.email}")
 
-        # Generate JWT token
-        access_token = create_access_token(
-            data={"sub": user_id, "email": user_data.email}
+        signed_token = generate_jwt_token(
+            data={"sub": account_id, "email": account_params.email}
         )
 
-        # Prepare response
-        user_response = UserResponse(
-            id=created_user["id"],
-            username=created_user["username"],
-            email=created_user["email"],
-            createdAt=created_user["created_at"],
+        account_response = UserResponse(
+            id=persisted_account["id"],
+            username=persisted_account["username"],
+            email=persisted_account["email"],
+            createdAt=persisted_account["created_at"],
         )
 
-        return Token(token=access_token, user=user_response)
+        return Token(token=signed_token, user=account_response)
 
     except HTTPException:
         raise
@@ -77,44 +75,40 @@ async def register(user_data: UserCreate):
 
 
 @router.post("/login", response_model=Token, status_code=status.HTTP_200_OK)
-async def login(login_data: LoginRequest):
+async def login(credential_payload: LoginRequest):
     """
     Authenticate user and receive access token
     """
     try:
-        # Get user by email
-        logger.info(f"Login attempt for email: {login_data.email}")
-        user = cosmos_db.get_user_by_email(login_data.email)
-        if not user:
-            logger.warning(f"Login failed: User not found for email {login_data.email}")
+        logger.info(f"Login attempt for email: {credential_payload.email}")
+        account_entity = cosmos_db.get_user_by_email(credential_payload.email)
+        if not account_entity:
+            logger.warning(f"Login failed: User not found for email {credential_payload.email}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password",
             )
 
-        # Verify password
-        if not verify_password(login_data.password, user["hashed_password"]):
-            logger.warning(f"Login failed: Invalid password for email {login_data.email}")
+        if not validate_credential(credential_payload.password, account_entity["hashed_password"]):
+            logger.warning(f"Login failed: Invalid password for email {credential_payload.email}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password",
             )
 
-        # Generate JWT token
-        access_token = create_access_token(
-            data={"sub": user["id"], "email": user["email"]}
+        signed_token = generate_jwt_token(
+            data={"sub": account_entity["id"], "email": account_entity["email"]}
         )
 
-        # Prepare response
-        user_response = UserResponse(
-            id=user["id"],
-            username=user["username"],
-            email=user["email"],
-            createdAt=user["created_at"],
+        account_response = UserResponse(
+            id=account_entity["id"],
+            username=account_entity["username"],
+            email=account_entity["email"],
+            createdAt=account_entity["created_at"],
         )
 
-        logger.info(f"Login successful for user: {user['email']}")
-        return Token(token=access_token, user=user_response)
+        logger.info(f"Login successful for user: {account_entity['email']}")
+        return Token(token=signed_token, user=account_response)
 
     except HTTPException:
         raise

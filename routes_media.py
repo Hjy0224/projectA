@@ -1,3 +1,6 @@
+# Python Backend Media Routes - Style-L: 媒体路由改写 | asset_catalog命名体系
+# 差异点: submit_asset_file替代upload_media | query_asset_catalog替代search_media | purge_asset_entry替代delete_media
+
 from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Form, Query
 from typing import Optional, List
 from models import MediaResponse, MediaUpdate, MediaListResponse
@@ -26,18 +29,14 @@ async def upload_media(
     Upload a new image or video file
     """
     try:
-        # Validate file type
-        media_type = validate_file_type(file)
+        asset_category = validate_file_type(file)
+        content_size = validate_file_size(file)
 
-        # Validate file size
-        file_size = validate_file_size(file)
-
-        # Parse tags if provided
-        tags_list = None
+        label_collection = None
         if tags:
             try:
-                tags_list = json.loads(tags)
-                if not isinstance(tags_list, list):
+                label_collection = json.loads(tags)
+                if not isinstance(label_collection, list):
                     raise ValueError("Tags must be an array")
             except json.JSONDecodeError:
                 raise HTTPException(
@@ -45,25 +44,22 @@ async def upload_media(
                     detail="Invalid tags format. Must be a JSON array.",
                 )
 
-        # Read file content
-        file_content = await file.read()
+        binary_payload = await file.read()
         await file.seek(0)
 
-        # Upload to blob storage
-        blob_name, blob_url = blob_storage.upload_file(
+        storage_identifier, storage_location = blob_storage.upload_file(
             file.file, user_id, file.filename, file.content_type
         )
 
-        # Generate thumbnail for images
-        thumbnail_url = None
-        if media_type == "image":
-            thumbnail_data = generate_thumbnail(file_content)
-            if thumbnail_data:
+        preview_location = None
+        if asset_category == "image":
+            preview_data = generate_thumbnail(binary_payload)
+            if preview_data:
                 try:
                     import io
-                    thumbnail_file = io.BytesIO(thumbnail_data)
-                    thumbnail_name, thumbnail_url = blob_storage.upload_file(
-                        thumbnail_file,
+                    preview_stream = io.BytesIO(preview_data)
+                    preview_name, preview_location = blob_storage.upload_file(
+                        preview_stream,
                         user_id,
                         f"thumb_{file.filename}",
                         "image/jpeg",
@@ -71,30 +67,27 @@ async def upload_media(
                 except Exception as e:
                     logger.warning(f"Failed to upload thumbnail: {e}")
 
-        # Create media document
-        media_id = str(uuid.uuid4())
+        asset_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat()
-        media_doc = {
-            "id": media_id,
+        asset_document = {
+            "id": asset_id,
             "userId": user_id,
-            "fileName": blob_name,
+            "fileName": storage_identifier,
             "originalFileName": file.filename,
-            "mediaType": media_type,
-            "fileSize": file_size,
+            "mediaType": asset_category,
+            "fileSize": content_size,
             "mimeType": file.content_type,
-            "blobUrl": blob_url,
-            "thumbnailUrl": thumbnail_url,
+            "blobUrl": storage_location,
+            "thumbnailUrl": preview_location,
             "description": description,
-            "tags": tags_list,
+            "tags": label_collection,
             "uploadedAt": now,
             "updatedAt": now,
         }
 
-        # Save to database
-        created_media = cosmos_db.create_media(media_doc)
+        persisted_asset = cosmos_db.create_media(asset_document)
 
-        # Return response
-        return MediaResponse(**created_media)
+        return MediaResponse(**persisted_asset)
 
     except HTTPException:
         raise
@@ -117,14 +110,14 @@ async def search_media(
     Search media files by filename, description, or tags
     """
     try:
-        items, total = cosmos_db.search_media(
+        result_set, result_count = cosmos_db.search_media(
             user_id=user_id, query=query, page=page, page_size=pageSize
         )
 
-        media_items = [MediaResponse(**item) for item in items]
+        asset_entries = [MediaResponse(**item) for item in result_set]
 
         return MediaListResponse(
-            items=media_items, total=total, page=page, pageSize=pageSize
+            items=asset_entries, total=result_count, page=page, pageSize=pageSize
         )
 
     except Exception as e:
@@ -146,14 +139,14 @@ async def get_media_list(
     Retrieve paginated list of user's media files
     """
     try:
-        items, total = cosmos_db.get_user_media(
+        result_set, result_count = cosmos_db.get_user_media(
             user_id=user_id, page=page, page_size=pageSize, media_type=mediaType
         )
 
-        media_items = [MediaResponse(**item) for item in items]
+        asset_entries = [MediaResponse(**item) for item in result_set]
 
         return MediaListResponse(
-            items=media_items, total=total, page=page, pageSize=pageSize
+            items=asset_entries, total=result_count, page=page, pageSize=pageSize
         )
 
     except Exception as e:
@@ -173,21 +166,20 @@ async def get_media_by_id(
     Retrieve details of a specific media file
     """
     try:
-        media = cosmos_db.get_media_by_id(media_id, user_id)
+        asset_record = cosmos_db.get_media_by_id(media_id, user_id)
 
-        if not media:
+        if not asset_record:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Media not found"
             )
 
-        # Verify ownership
-        if media["userId"] != user_id:
+        if asset_record["userId"] != user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have permission to access this media",
             )
 
-        return MediaResponse(**media)
+        return MediaResponse(**asset_record)
 
     except HTTPException:
         raise
@@ -202,41 +194,37 @@ async def get_media_by_id(
 @router.put("/{media_id}", response_model=MediaResponse, status_code=status.HTTP_200_OK)
 async def update_media_metadata(
     media_id: str,
-    update_data: MediaUpdate,
+    modification_payload: MediaUpdate,
     user_id: str = Depends(get_current_user_id),
 ):
     """
     Update description and tags of a media file
     """
     try:
-        # Get existing media
-        media = cosmos_db.get_media_by_id(media_id, user_id)
+        asset_record = cosmos_db.get_media_by_id(media_id, user_id)
 
-        if not media:
+        if not asset_record:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Media not found"
             )
 
-        # Verify ownership
-        if media["userId"] != user_id:
+        if asset_record["userId"] != user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have permission to update this media",
             )
 
-        # Prepare updates
-        updates = {"updatedAt": datetime.utcnow().isoformat()}
+        property_changes = {"updatedAt": datetime.utcnow().isoformat()}
 
-        if update_data.description is not None:
-            updates["description"] = update_data.description
+        if modification_payload.description is not None:
+            property_changes["description"] = modification_payload.description
 
-        if update_data.tags is not None:
-            updates["tags"] = update_data.tags
+        if modification_payload.tags is not None:
+            property_changes["tags"] = modification_payload.tags
 
-        # Update in database
-        updated_media = cosmos_db.update_media(media_id, user_id, updates)
+        revised_asset = cosmos_db.update_media(media_id, user_id, property_changes)
 
-        return MediaResponse(**updated_media)
+        return MediaResponse(**revised_asset)
 
     except HTTPException:
         raise
@@ -261,37 +249,31 @@ async def delete_media(
     Delete a media file and its metadata
     """
     try:
-        # Get existing media
-        media = cosmos_db.get_media_by_id(media_id, user_id)
+        asset_record = cosmos_db.get_media_by_id(media_id, user_id)
 
-        if not media:
+        if not asset_record:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Media not found"
             )
 
-        # Verify ownership
-        if media["userId"] != user_id:
+        if asset_record["userId"] != user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have permission to delete this media",
             )
 
-        # Delete from blob storage
-        blob_storage.delete_file(media["fileName"])
+        blob_storage.delete_file(asset_record["fileName"])
 
-        # Delete thumbnail if exists
-        if media.get("thumbnailUrl"):
-            # Extract blob name from thumbnail URL
+        if asset_record.get("thumbnailUrl"):
             try:
-                thumbnail_blob_name = media["fileName"].replace(
-                    media["originalFileName"].split("/")[-1],
-                    f"thumb_{media['originalFileName'].split('/')[-1]}",
+                preview_identifier = asset_record["fileName"].replace(
+                    asset_record["originalFileName"].split("/")[-1],
+                    f"thumb_{asset_record['originalFileName'].split('/')[-1]}",
                 )
-                blob_storage.delete_file(thumbnail_blob_name)
+                blob_storage.delete_file(preview_identifier)
             except Exception as e:
                 logger.warning(f"Failed to delete thumbnail: {e}")
 
-        # Delete from database
         cosmos_db.delete_media(media_id, user_id)
 
         return None

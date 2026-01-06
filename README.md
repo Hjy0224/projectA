@@ -3,7 +3,7 @@
 A FastAPI-based REST API for cloud media storage and management, integrated with Azure Cosmos DB and Azure Blob Storage.
 
 ## Features
-111
+
 - User authentication with JWT tokens
 - Image and video upload to Azure Blob Storage
 - Metadata storage in Azure Cosmos DB for NoSQL
@@ -277,28 +277,4 @@ For production deployment:
 4. **Set up monitoring**: Use Azure Application Insights
 5. **Configure firewall**: Restrict Cosmos DB and Storage access
 6. **Scale settings**: Adjust Cosmos DB throughput based on usage
-7. **Backup**: Enable point-in-time restore for Cosmos DB
-
-### Deploy to Azure App Service
-
-```bash
-# Install Azure CLI
-# Login to Azure
-az login
-
-# Create App Service
-az webapp up --name your-app-name --runtime "PYTHON:3.9"
-
-# Configure environment variables in Azure Portal
-# or using CLI:
-az webapp config appsettings set --name your-app-name \
-  --settings COSMOS_ENDPOINT=... COSMOS_KEY=...
-```
-
-## License
-
-This project is created for educational purposes (COM682 Coursework 2).
-
-## Support
-
-For issues and questions, please refer to the API documentation at `/api/docs` when the server is running.
+7. **Backup**: Enable point-in-time restore for Cosmos DB``
